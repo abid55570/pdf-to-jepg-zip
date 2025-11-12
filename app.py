@@ -23,7 +23,7 @@ def convert_pdf(pdf_path, pdf_original_name, skip_start, skip_end):
     page_counter = 1
     for i in range(start_index, end_index):
         page = doc.load_page(i)
-        pix = page.get_pixmap(dpi=200)
+        pix = page.get_pixmap(dpi=100)
         img_path = os.path.join(temp_dir, f"({page_counter}).jpeg")
         pix.save(img_path)
         page_counter += 1
