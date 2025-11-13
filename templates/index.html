@@ -1,47 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>PDF to Image ZIP Converter</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
 </head>
 <body>
   <div class="container">
-    <h1>Convert PDF to JPG Slides</h1>
+    <h1>📄 Convert PDF to JPG Slides</h1>
     <p class="subtitle">Fast • Simple • Free</p>
-    
-    <form method="POST" enctype="multipart/form-data" class="upload-form">
+
+    <form method="POST" enctype="multipart/form-data" class="upload-form" action="/">
       <label class="input-label">Upload PDF:</label>
-      <input 
-        type="file" 
-        name="pdf" 
-        accept=".pdf" 
-        required
-      ><br>
+      <!-- NOTE: single file input named "pdf" to match Flask code -->
+      <input type="file" name="pdf" accept="application/pdf" required><br>
 
       <label class="input-label">Remove pages from start:</label>
-      <input 
-        type="number" 
-        name="skip_start" 
-        min="0" 
-        value="0"
-        style="width: 70px;"
-      ><br>
+      <input type="number" name="skip_start" min="0" value="0"><br>
 
       <label class="input-label">Remove pages from end:</label>
-      <input 
-        type="number" 
-        name="skip_end" 
-        min="0" 
-        value="0"
-        style="width: 70px;"
-      ><br>
+      <input type="number" name="skip_end" min="0" value="0"><br>
 
-      <button type="submit" class="btn">Click and Clap</button>
+      <button type="submit" class="btn">🚀 Convert to ZIP</button>
     </form>
 
-    <p class="footer">Built with love by Abid</p>
+    <p class="footer">Built with ❤️ by Abid</p>
   </div>
 </body>
 </html>
