@@ -8,21 +8,40 @@
 </head>
 <body>
   <div class="container">
-    <h1>📄 Convert PDFs to JPG Slides</h1>
+    <h1>Convert PDF to JPG Slides</h1>
     <p class="subtitle">Fast • Simple • Free</p>
+    
     <form method="POST" enctype="multipart/form-data" class="upload-form">
-      <label class="input-label">Upload PDF(s):</label>
-      <input type="file" name="pdfs" accept="application/pdf" multiple required><br>
+      <label class="input-label">Upload PDF:</label>
+      <input 
+        type="file" 
+        name="pdf" 
+        accept=".pdf" 
+        required
+      ><br>
 
       <label class="input-label">Remove pages from start:</label>
-      <input type="number" name="skip_start" min="0" value="0"><br>
+      <input 
+        type="number" 
+        name="skip_start" 
+        min="0" 
+        value="0"
+        style="width: 70px;"
+      ><br>
 
       <label class="input-label">Remove pages from end:</label>
-      <input type="number" name="skip_end" min="0" value="0"><br>
+      <input 
+        type="number" 
+        name="skip_end" 
+        min="0" 
+        value="0"
+        style="width: 70px;"
+      ><br>
 
-      <button type="submit" class="btn">🚀 Click and Clap 👏</button>
+      <button type="submit" class="btn">Click and Clap</button>
     </form>
-    <p class="footer">Built with ❤️ by Abid</p>
+
+    <p class="footer">Built with love by Abid</p>
   </div>
 </body>
 </html>
