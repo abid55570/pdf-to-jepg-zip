@@ -1,90 +1,135 @@
+# --------------------------------------------------------------
+#  Lightweight PDF → JPEG-in-ZIP converter (Flask)
+#  - No on-disk JPEGs
+#  - In-memory ZIP streaming
+#  - Configurable DPI / JPEG quality
+#  - Hard page-count limit
+# --------------------------------------------------------------
+
 import os
+import io
 import zipfile
 import tempfile
+from flask import Flask, render_template, request, send_file, stream_with_context, abort
+
 import fitz  # PyMuPDF
-from flask import Flask, render_template, request, send_file
 
 app = Flask(__name__)
 
-# --- Utility function ---
-def convert_pdf(pdf_path, pdf_original_name, skip_start, skip_end):
-    doc = fitz.open(pdf_path)
+# --------------------------------------------------------------
+#  Configuration (tweak for your free tier)
+# --------------------------------------------------------------
+MAX_PAGES_PER_PDF = 100          # safety net – increase if you trust the source
+DPI = 72                         # 72 → ~ 0.5 MB per page; 100 → ~ 1 MB
+JPEG_QUALITY = 75                # 0-100, lower = smaller file
+CHUNK_SIZE = 8192                # streaming chunk size
+
+
+# --------------------------------------------------------------
+#  Core conversion – yields (filename, bytes_io) for each PDF
+# --------------------------------------------------------------
+def pdf_to_zip_stream(pdf_bytes: bytes, original_name: str, skip_start: int, skip_end: int):
+    """
+    Yield (zip_entry_name, BytesIO) for a single PDF.
+    The ZIP contains JPEGs named (1).jpeg … (N).jpeg.
+    """
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(doc)
 
-    start_index = skip_start
-    end_index = total_pages - skip_end
-    if start_index >= end_index:
-        return None, 0, None
+    start = skip_start
+    end = total_pages - skip_end
+    if start >= end:
+        return
 
-    temp_dir = tempfile.mkdtemp()
-    pdf_name = os.path.splitext(pdf_original_name)[0]
+    page_count = end - start
+    if page_count > MAX_PAGES_PER_PDF:
+        raise ValueError(f"PDF would produce {page_count} pages – exceeds limit of {MAX_PAGES_PER_PDF}")
 
-    # Convert pages to images (renumber from (1))
-    page_counter = 1
-    for i in range(start_index, end_index):
-        page = doc.load_page(i)
-        pix = page.get_pixmap(dpi=100)
-        img_path = os.path.join(temp_dir, f"({page_counter}).jpeg")
-        pix.save(img_path)
-        page_counter += 1
+    # Build ZIP in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for idx in range(start, end):
+            page = doc.load_page(idx)
+            pix = page.get_pixmap(dpi=DPI)
+            img_bytes = pix.tobytes("jpeg", jpg_quality=JPEG_QUALITY)
 
-    # Create ZIP file named <pdf_name>_<page_count>.zip
-    page_count = end_index - start_index
-    zip_name = f"{pdf_name}_{page_count}.zip"
-    zip_path = os.path.join(temp_dir, zip_name)
+            entry_name = f"({idx - start + 1}).jpeg"
+            zf.writestr(entry_name, img_bytes)
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for file in sorted(os.listdir(temp_dir)):
-            if file.endswith(".jpeg"):
-                zipf.write(os.path.join(temp_dir, file), arcname=file)
-
-    return zip_path, page_count, zip_name
+    zip_buffer.seek(0)
+    zip_name = f"{os.path.splitext(original_name)[0]}_{page_count}.zip"
+    yield zip_name, zip_buffer
 
 
+# --------------------------------------------------------------
+#  Flask routes
+# --------------------------------------------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
-    if request.method == "POST":
+    if request.method == "GET":
+        return render_template("index.html")
+
+    # ---- POST -------------------------------------------------
+    try:
         skip_start = int(request.form.get("skip_start", 0))
-        skip_end = int(request.form.get("skip_end", 0))
-        uploaded_files = request.files.getlist("pdfs")
+        skip_end   = int(request.form.get("skip_end", 0))
+    except ValueError:
+        abort(400, "skip_start / skip_end must be integers")
 
-        output_files = []
+    uploaded = request.files.getlist("pdfs")
+    if not uploaded:
+        abort(400, "No PDF files uploaded")
 
-        for file in uploaded_files:
-            if file and file.filename.endswith(".pdf"):
-                pdf_original_name = file.filename  # ✅ Keep original filename
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
-                    file.save(temp_pdf.name)
-                    zip_path, count, zip_name = convert_pdf(
-                        temp_pdf.name, pdf_original_name, skip_start, skip_end
-                    )
-                    if zip_path:
-                        output_files.append((zip_name, zip_path, count))
+    # ---------- Single PDF → direct download ----------
+    if len(uploaded) == 1:
+        file = uploaded[0]
+        if not file.filename.lower().endswith(".pdf"):
+            abort(400, "Only PDF files are allowed")
+        pdf_bytes = file.read()
 
-        # --- Handle output ---
-        if len(output_files) == 1:
-            # Single file → Download directly with correct name
-            zip_name, zip_path, _ = output_files[0]
-            return send_file(
-                zip_path,
-                as_attachment=True,
-                download_name=zip_name,  # ✅ ensures correct name
-            )
-        else:
-            # Multiple files → bundle into one master zip
-            combined_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
-            with zipfile.ZipFile(combined_zip.name, "w", zipfile.ZIP_DEFLATED) as zf:
-                for name, path, _ in output_files:
-                    zf.write(path, arcname=name)
+        def generate():
+            for zip_name, zip_io in pdf_to_zip_stream(pdf_bytes, file.filename, skip_start, skip_end):
+                yield from zip_io
+        return send_file(
+            generate(),
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=zip_name,
+        )
 
-            return send_file(
-                combined_zip.name,
-                as_attachment=True,
-                download_name="all_converted.zip",
-            )
+    # ---------- Multiple PDFs → master ZIP ----------
+    def master_generator():
+        master_zip = io.BytesIO()
+        with zipfile.ZipFile(master_zip, "w", zipfile.ZIP_DEFLATED) as mz:
+            for file in uploaded:
+                if not file.filename.lower().endswith(".pdf"):
+                    continue
+                pdf_bytes = file.read()
+                for sub_zip_name, sub_zip_io in pdf_to_zip_stream(
+                    pdf_bytes, file.filename, skip_start, skip_end
+                ):
+                    sub_zip_io.seek(0)
+                    mz.writestr(sub_zip_name, sub_zip_io.read())
 
-    return render_template("index.html")
+        master_zip.seek(0)
+        while True:
+            chunk = master_zip.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            yield chunk
+
+    return send_file(
+        stream_with_context(master_generator()),
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="all_converted.zip",
+    )
 
 
+# --------------------------------------------------------------
+#  Run (debug off for production)
+# --------------------------------------------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    # On Render free tier use the port supplied by the platform
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
