@@ -38,9 +38,9 @@ def convert_pdf_to_zip(pdf_bytes: bytes, filename: str, skip_start: int, skip_en
         for i in range(start, end):
             page = doc.load_page(i)
             pix = page.get_pixmap(dpi=DPI)
-            img_data = pix.tobytes("jpeg", jpg_quality=JPEG_QUALITY)
+            img_data = pix.tobytes("jpg", jpg_quality=JPEG_QUALITY)
             # name pages starting at 1 inside the zip
-            zf.writestr(f"({i - start + 1}).jpeg", img_data)
+            zf.writestr(f"({i - start + 1}).jpg", img_data)
 
     buffer.seek(0)
     safe_name = os.path.splitext(os.path.basename(filename))[0]
@@ -90,3 +90,4 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
