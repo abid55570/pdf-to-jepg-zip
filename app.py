@@ -1,53 +1,67 @@
 # --------------------------------------------------------------
-#  PDF to JPEG-in-ZIP Converter (Single File Only)
-#  - Super lightweight for Render free tier
-#  - In-memory, no temp files
+#  PDF → JPEG → Streaming ZIP (supports 300–1500 pages)
+#  Ultra-low RAM, perfect for Render free tier
 # --------------------------------------------------------------
 
 import os
-import io
-import zipfile
-from flask import Flask, render_template, request, send_file, abort
+from flask import Flask, render_template, request, Response, abort
 import fitz  # PyMuPDF
+from zipstream import ZipStream
 
 app = Flask(__name__)
 
 # --------------------- Config ---------------------
-MAX_PAGES = 200        # Prevent abuse
-DPI = 55               # Small images (~0.4 MB per page)
-JPEG_QUALITY = 60      # Good balance size/quality
+MAX_PAGES = 1500       # Safe limit
+DPI = 55               # Low memory footprint
+JPEG_QUALITY = 60      # Balanced size/quality
 # --------------------------------------------------
 
-def convert_pdf_to_zip(pdf_bytes: bytes, filename: str, skip_start: int, skip_end: int):
-    """Convert one PDF → return (zip_name, BytesIO)"""
+
+def generate_streaming_zip(pdf_bytes, filename, skip_start, skip_end):
+    """Yields ZIP chunks without storing anything in memory."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     total = len(doc)
-    start = max(0, skip_start)
-    end = total - max(0, skip_end)
+
+    # Page range
+    start = skip_start
+    end = total - skip_end
 
     if start >= end or end <= 0:
-        raise ValueError("No pages to convert. Check skip_start/skip_end values.")
+        raise ValueError("No pages to convert")
 
     page_count = end - start
     if page_count > MAX_PAGES:
         raise ValueError(f"Too many pages: {page_count} > {MAX_PAGES}")
 
-    # Build ZIP in memory
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for i in range(start, end):
-            page = doc.load_page(i)
-            pix = page.get_pixmap(dpi=DPI)
-            img_data = pix.tobytes("jpg", jpg_quality=JPEG_QUALITY)
-            # name pages starting at 1 inside the zip
-            zf.writestr(f"({i - start + 1}).jpg", img_data)
-            pix = None
-            page = None
+    zip_filename = f"{os.path.splitext(filename)[0]}_{page_count}.zip"
 
-    buffer.seek(0)
-    safe_name = os.path.splitext(os.path.basename(filename))[0]
-    zip_name = f"{safe_name}_{page_count}.zip"
-    return zip_name, buffer
+    # Create streaming ZIP
+    zs = ZipStream()
+
+    # Add each page as a separate streamed JPEG
+    for i in range(start, end):
+        def make_generator(page_index):
+
+            def jpeg_generator():
+                page = doc.load_page(page_index)
+
+                # Low-RAM pixmap
+                pix = page.get_pixmap(matrix=fitz.Matrix(DPI / 72, DPI / 72), alpha=False)
+                data = pix.tobytes("jpeg", jpg_quality=JPEG_QUALITY)
+
+                # Yield JPEG bytes
+                yield data
+
+                # Free memory
+                pix = None
+                page = None
+
+            return jpeg_generator
+
+        zs.add(f"({i - start + 1}).jpeg", make_generator(i))
+
+    return zip_filename, zs
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -58,32 +72,31 @@ def index():
     try:
         skip_start = int(request.form.get("skip_start", 0))
         skip_end = int(request.form.get("skip_end", 0))
-    except ValueError:
+    except:
         return abort(400, "skip_start and skip_end must be integers")
 
     file = request.files.get("pdf")
-    if not file or not file.filename or not file.filename.lower().endswith(".pdf"):
-        return abort(400, "Please upload a single PDF file")
+    if not file or not file.filename.lower().endswith(".pdf"):
+        return abort(400, "Upload a single PDF file")
 
     pdf_bytes = file.read()
 
+    # Build streaming zip
     try:
-        zip_name, zip_buffer = convert_pdf_to_zip(pdf_bytes, file.filename, skip_start, skip_end)
-    except ValueError as e:
-        return abort(400, str(e))
+        zip_name, zs = generate_streaming_zip(pdf_bytes, file.filename, skip_start, skip_end)
     except Exception as e:
-        # unexpected error -> log on server; user gets 500
-        app.logger.exception("Conversion failed")
-        return abort(500, "Internal server error during conversion")
-    zip_buffer.seek(0)
-    return send_file(
-        zip_buffer,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name=zip_name
-    )
+        return abort(400, str(e))
 
+    # Streaming response
+    response = Response(
+        zs.stream(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={zip_name}"}
+    )
+    return response
+
+
+# --- Run on Render ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
-
