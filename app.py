@@ -30,26 +30,24 @@ def generate_streaming_zip(pdf_bytes, filename, skip_start, skip_end):
 
     zs = ZipStream()
 
-    # FIXED VERSION ----------------------------
-    # zipstream requires data=<generator> NOT data=function
-    # ------------------------------------------
+    # For each page, create a generator *object* and pass it as data
     for i in range(start, end):
-
         def jpeg_gen(index=i):
+            # generator that yields the JPEG bytes for a single page
             page = doc.load_page(index)
             pix = page.get_pixmap(
                 matrix=fitz.Matrix(DPI / 72, DPI / 72),
                 alpha=False,
             )
-            yield pix.tobytes("jpeg", jpg_quality=JPEG_QUALITY)
-            pix = None
-            page = None
+            try:
+                yield pix.tobytes("jpeg", jpg_quality=JPEG_QUALITY)
+            finally:
+                # Try to free references promptly
+                pix = None
+                page = None
 
-        # IMPORTANT: pass generator function via data=
-        zs.add(
-            name=f"page_{i - start + 1}.jpeg",
-            data=jpeg_gen(),   # this is the FIX
-        )
+        # IMPORTANT: pass filename first, generator object second (positional)
+        zs.add(f"page_{i - start + 1}.jpeg", jpeg_gen())
 
     return zip_filename, zs
 
@@ -62,7 +60,7 @@ def index():
     try:
         skip_start = int(request.form.get("skip_start", 0))
         skip_end = int(request.form.get("skip_end", 0))
-    except:
+    except Exception:
         return abort(400, "Invalid skip_start or skip_end")
 
     file = request.files.get("pdf")
