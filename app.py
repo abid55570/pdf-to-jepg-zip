@@ -13,9 +13,9 @@ import fitz  # PyMuPDF
 app = Flask(__name__)
 
 # --------------------- Config ---------------------
-MAX_PAGES = 100        # Prevent abuse
-DPI = 72               # Small images (~0.4 MB per page)
-JPEG_QUALITY = 75      # Good balance size/quality
+MAX_PAGES = 200        # Prevent abuse
+DPI = 55               # Small images (~0.4 MB per page)
+JPEG_QUALITY = 60      # Good balance size/quality
 # --------------------------------------------------
 
 def convert_pdf_to_zip(pdf_bytes: bytes, filename: str, skip_start: int, skip_end: int):
@@ -41,12 +41,13 @@ def convert_pdf_to_zip(pdf_bytes: bytes, filename: str, skip_start: int, skip_en
             img_data = pix.tobytes("jpg", jpg_quality=JPEG_QUALITY)
             # name pages starting at 1 inside the zip
             zf.writestr(f"({i - start + 1}).jpg", img_data)
+            pix = None
+            page = None
 
     buffer.seek(0)
     safe_name = os.path.splitext(os.path.basename(filename))[0]
     zip_name = f"{safe_name}_{page_count}.zip"
     return zip_name, buffer
-
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -66,7 +67,6 @@ def index():
 
     pdf_bytes = file.read()
 
-    # --- Convert ---
     try:
         zip_name, zip_buffer = convert_pdf_to_zip(pdf_bytes, file.filename, skip_start, skip_end)
     except ValueError as e:
@@ -75,8 +75,6 @@ def index():
         # unexpected error -> log on server; user gets 500
         app.logger.exception("Conversion failed")
         return abort(500, "Internal server error during conversion")
-
-    # --- Return the in-memory BytesIO using send_file (works with gunicorn) ---
     zip_buffer.seek(0)
     return send_file(
         zip_buffer,
@@ -85,8 +83,6 @@ def index():
         download_name=zip_name
     )
 
-
-# --- Run on Render / locally ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
