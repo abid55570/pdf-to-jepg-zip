@@ -3,30 +3,77 @@
 <head>
   <meta charset="UTF-8">
   <title>PDF to Image ZIP Converter</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="/static/styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 </head>
-
 <body>
   <div class="container">
     <h1>📄 Convert PDFs to JPG Slides</h1>
     <p class="subtitle">Fast • Simple • Free</p>
 
     <form method="POST" enctype="multipart/form-data" class="upload-form">
-      <label class="input-label">Upload PDF(s):</label>
-      <input type="file" name="pdf" accept="application/pdf" required>
+      <label class="input-label">Upload PDF:</label>
+      <input type="file" name="pdf" accept="application/pdf" required><br>
 
       <label class="input-label">Remove pages from start:</label>
-      <input type="number" name="skip_start" min="0" value="0">
+      <input type="number" name="skip_start" min="0" value="0"><br>
 
       <label class="input-label">Remove pages from end:</label>
-      <input type="number" name="skip_end" min="0" value="0">
+      <input type="number" name="skip_end" min="0" value="0"><br>
+
+      <!-- ✅ Progress BAR block -->
+      <div id="progress-container" style="
+          width: 100%;
+          background: rgba(255,255,255,0.2);
+          border-radius: 6px;
+          margin-top: 15px;
+          height: 12px;
+          overflow: hidden;
+          display: none;
+      ">
+        <div id="progress-bar" style="
+            height: 100%;
+            width: 0%;
+            background: #ff7a18;
+            transition: width 0.2s ease;
+        "></div>
+      </div>
 
       <button type="submit" class="btn">🚀 Click and Clap 👏</button>
     </form>
 
     <p class="footer">Built with ❤️ by Abid</p>
   </div>
+
+  <!-- ✅ JS for progress bar -->
+  <script>
+    document.querySelector(".upload-form").addEventListener("submit", function () {
+        const barContainer = document.getElementById("progress-container");
+        const bar = document.getElementById("progress-bar");
+
+        barContainer.style.display = "block";
+        bar.style.width = "0%";
+
+        let progress = 0;
+
+        // Smooth animation
+        const interval = setInterval(() => {
+            if (progress < 95) {  
+                progress += 2;
+                bar.style.width = progress + "%";
+            }
+        }, 120);
+
+        // Detect when download starts (page losing focus)
+        const checkDownload = setInterval(() => {
+            if (document.visibilityState === "hidden") {
+                bar.style.width = "100%";
+                clearInterval(interval);
+                clearInterval(checkDownload);
+            }
+        }, 200);
+    });
+  </script>
+
 </body>
 </html>
-
